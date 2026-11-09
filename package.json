@@ -12,7 +12,9 @@
     "index.server.tsx",
     "client/",
     "server/",
-    "shared/"
+    "shared/",
+    "adapters/",
+    "docs/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
