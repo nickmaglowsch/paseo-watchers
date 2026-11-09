@@ -3,7 +3,7 @@
 //   status                     print adapter JSON (default)
 //   start|stop <name>          install.sh / uninstall.sh
 //   set-max-runs <name> <n>    edit config.json max_runs
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,16 @@ import { join } from "node:path";
 const DIR = join(homedir(), ".local/state/pr-review-watcher");
 const SCRIPTS = join(homedir(), ".claude/skills/pr-review-watcher/scripts");
 const SELF = new URL(import.meta.url).pathname;
+// Serialize config edits: re-run this command under a kernel lock, released if the process dies.
+function holdLock(lockPath) {
+  if (process.env.WATCHERS_LOCKED) return;
+  const result = spawnSync("/usr/bin/lockf", ["-k", "-t", "30", lockPath, process.execPath, SELF, ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: { ...process.env, WATCHERS_LOCKED: "1" },
+  });
+  process.exit(result.status ?? 1);
+}
+
 const label = (name) => `com.${userInfo().username}.pr-review-watcher.${name}`;
 
 const readJson = (path) => {
@@ -91,6 +101,7 @@ else if (command === "start" || command === "stop") {
     console.error("max runs must be a whole number from 0 to 100");
     process.exit(2);
   }
+  holdLock(`${path}.lock`);
   const config = readJson(path);
   config.max_runs = n;
   const tmp = `${path}.${process.pid}.tmp`;

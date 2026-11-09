@@ -3,7 +3,7 @@
 //   status                print adapter JSON (default)
 //   start|stop            load / unload the launchd job (plist is kept)
 //   set <KEY> <value>     edit one whitelisted key in ~/.pr-keeper/config
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,16 @@ const LABEL = "com.pr-keeper";
 const PLIST = join(homedir(), "Library/LaunchAgents", `${LABEL}.plist`);
 const DOMAIN = `gui/${userInfo().uid}`;
 const SELF = new URL(import.meta.url).pathname;
+// Serialize config edits: re-run this command under a kernel lock, released if the process dies.
+function holdLock(lockPath) {
+  if (process.env.WATCHERS_LOCKED) return;
+  const result = spawnSync("/usr/bin/lockf", ["-k", "-t", "30", lockPath, process.execPath, SELF, ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: { ...process.env, WATCHERS_LOCKED: "1" },
+  });
+  process.exit(result.status ?? 1);
+}
+
 const EDITABLE = {
   MAX_ROUNDS_PER_AGENT: "Max rounds per agent",
   MAX_AGENT_RUNS_PER_DAY: "Max agent runs per day (0 = no limit)",
@@ -120,6 +130,7 @@ else if (command === "set") {
     process.exit(2);
   }
   const path = join(HOME, "config");
+  holdLock(`${path}.lock`);
   const text = readConfig();
   const line = `${key}=${value}`;
   // Drop every assignment of the key (pr-keeper uses the last one), then append the new value.
