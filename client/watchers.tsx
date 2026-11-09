@@ -16,13 +16,13 @@ function useWatchers() {
 }
 
 function ago(iso: string | undefined): string {
-  if (!iso) return "never ticked";
+  if (!iso) return "no activity logged";
   const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
   if (Number.isNaN(minutes)) return iso;
-  if (minutes < 1) return "ticked just now";
-  if (minutes < 60) return `ticked ${minutes}m ago`;
-  if (minutes < 48 * 60) return `ticked ${Math.round(minutes / 60)}h ago`;
-  return `ticked ${Math.round(minutes / 1440)}d ago`;
+  if (minutes < 1) return "active just now";
+  if (minutes < 60) return `active ${minutes}m ago`;
+  if (minutes < 48 * 60) return `active ${Math.round(minutes / 60)}h ago`;
+  return `active ${Math.round(minutes / 1440)}d ago`;
 }
 
 function makeStyles(theme: Theme, compact: boolean) {

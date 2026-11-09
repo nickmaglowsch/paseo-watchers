@@ -10,23 +10,31 @@ function banner(title: string, body: string) {
   );
 }
 
-type Seen = { busy: boolean; attention: string };
+type Seen = { agents: Set<string>; attention: string };
 
 /** Returns a function that compares each poll with the last one and notifies on changes. */
-export function createNotifier() {
+export function createNotifier(send: (title: string, body: string) => void = banner) {
   let previous: Map<string, Seen> | null = null;
   return (adapters: AdapterResult[], enabled: boolean) => {
     const next = new Map<string, Seen>();
     for (const adapter of adapters) {
+      // A failed poll says nothing new: keep its last baseline so recovery does not replay alerts.
+      if (adapter.error) {
+        for (const [key, seen] of previous ?? []) if (key.startsWith(`${adapter.id}/`)) next.set(key, seen);
+        continue;
+      }
       for (const w of adapter.watchers) {
         const key = `${adapter.id}/${w.id}`;
-        const now = { busy: w.busy, attention: w.attention ?? "" };
+        const now = { agents: new Set(w.agents.map((a) => a.id)), attention: w.attention ?? "" };
         next.set(key, now);
         const before = previous?.get(key);
         // First poll only records state, so a daemon restart does not replay old alerts.
         if (!previous || !enabled) continue;
-        if (now.busy && !before?.busy) banner(w.title, "A fixer started");
-        if (now.attention && now.attention !== before?.attention) banner(w.title, now.attention);
+        // Each new fixer agent id is a fixer start, even while another one is still busy.
+        for (const agent of w.agents) {
+          if (!before?.agents.has(agent.id)) send(w.title, `${agent.label ?? "Fixer"} started`);
+        }
+        if (now.attention && now.attention !== before?.attention) send(w.title, now.attention);
       }
     }
     previous = next;

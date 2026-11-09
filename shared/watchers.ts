@@ -11,7 +11,8 @@ export const adapterOutput = z.object({
       busy: z.boolean().default(false),
       detail: z.string().optional(),
       lastTick: z.string().optional(),
-      // Non-empty = needs you. A new value raises a notification.
+      // Non-empty = needs you. A new value raises a notification. A new agents[].id = "fixer started".
+      // lastTick = last logged activity; a watcher that ticks silently may look older than it is.
       attention: z.string().optional(),
       links: z.array(z.object({ label: z.string(), url: z.string(), note: z.string().optional() })).default([]),
       agents: z.array(z.object({ id: z.string(), label: z.string().optional() })).default([]),

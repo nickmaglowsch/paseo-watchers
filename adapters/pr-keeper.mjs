@@ -32,7 +32,14 @@ function tail(path, n) {
 }
 
 const readConfig = () => (existsSync(join(HOME, "config")) ? readFileSync(join(HOME, "config"), "utf8") : "");
-const configValue = (text, key) => text.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim() ?? "";
+// Same rules as pr-keeper's load_config: trimmed, quotes stripped, the last assignment wins.
+const configValue = (text, key) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith("#") && line.split("=", 1)[0].trim() === key)
+    .map((line) => line.slice(line.indexOf("=") + 1).trim().replace(/^"|"$/g, ""))
+    .at(-1) ?? "";
 
 function status() {
   if (!existsSync(HOME)) return process.stdout.write(JSON.stringify({ watchers: [] }));
@@ -48,18 +55,28 @@ function status() {
     slug = remote.trim().match(/github\.com[:/](.+?)(\.git)?$/)?.[1] ?? null;
   } catch {}
 
-  const log = tail(join(HOME, "log"), 60);
+  // A tick spans several seconds, so keep each PR's latest event across the tail instead of
+  // grouping by timestamp. NOTIFY lines are pr-keeper asking for you about one PR.
+  const log = tail(join(HOME, "log"), 300);
   const stamp = (line) => line.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)?.[0];
   const last = stamp(log.at(-1) ?? "");
-  const tick = log.filter((line) => stamp(line) === last);
   const notes = new Map();
-  for (const line of tick) {
-    const m = line.match(/ #(\d+) (.*)$/);
-    if (m) notes.set(Number(m[1]), m[2]);
+  const needsYou = new Map();
+  for (const line of log) {
+    const notify = line.match(/NOTIFY pr-keeper #(\d+): (.*)$/);
+    const event = notify ?? line.match(/ #(\d+) (.*)$/);
+    if (!event) continue;
+    const n = Number(event[1]);
+    if (notify) needsYou.set(n, notify[2]);
+    else {
+      notes.set(n, event[2]);
+      if (event[2].startsWith("skip: already tried")) needsYou.set(n, needsYou.get(n) ?? "already tried, needs you");
+      else needsYou.delete(n);
+    }
   }
-  const stuck = [...notes].filter(([, note]) => note.startsWith("skip: already tried")).map(([n]) => `#${n}`);
+  const stuck = [...needsYou].map(([n, why]) => `#${n}: ${why}`);
   // Strip the timestamp so a repeating error keeps the same text and notifies once.
-  const error = tick.find((line) => line.includes("ERROR"))?.replace(/^.*?ERROR /, "");
+  const error = log.at(-1)?.includes("ERROR") ? log.at(-1).replace(/^.*?ERROR /, "") : undefined;
   const busy = [...notes.values()].some((note) => /agent (started|is running)/.test(note));
 
   const numbers = [...new Set([...Object.keys(state).map(Number), ...notes.keys()])].sort((a, b) => b - a);
@@ -70,7 +87,7 @@ function status() {
     busy,
     detail: `${numbers.length} PRs · ${configValue(config, "DRY_RUN") === "1" ? "dry run" : "live"}`,
     lastTick: last ? new Date(last.replace(" ", "T")).toISOString() : undefined,
-    attention: error ?? (stuck.length ? `Already tried, needs you: ${stuck.join(", ")}` : undefined),
+    attention: error ?? (stuck.length ? stuck.join("\n") : undefined),
     links: numbers.map((n) => ({
       label: `#${n}`,
       url: slug ? `https://github.com/${slug}/pull/${n}` : "",
@@ -105,9 +122,12 @@ else if (command === "set") {
   const path = join(HOME, "config");
   const text = readConfig();
   const line = `${key}=${value}`;
-  const next = new RegExp(`^${key}=.*$`, "m").test(text) ? text.replace(new RegExp(`^${key}=.*$`, "m"), line) : `${text.trimEnd()}\n${line}\n`;
-  writeFileSync(`${path}.tmp`, next);
-  renameSync(`${path}.tmp`, path);
+  // Drop every assignment of the key (pr-keeper uses the last one), then append the new value.
+  const kept = text.split("\n").filter((l) => l.trim().startsWith("#") || l.split("=", 1)[0].trim() !== key);
+  const next = `${kept.join("\n").trimEnd()}\n${line}\n`;
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, next);
+  renameSync(tmp, path);
   console.log(line);
 } else {
   console.error(`unknown command: ${command}`);

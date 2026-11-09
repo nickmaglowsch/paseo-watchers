@@ -93,8 +93,9 @@ else if (command === "start" || command === "stop") {
   }
   const config = readJson(path);
   config.max_runs = n;
-  writeFileSync(`${path}.tmp`, `${JSON.stringify(config, null, 2)}\n`);
-  renameSync(`${path}.tmp`, path);
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`);
+  renameSync(tmp, path);
   console.log(`max_runs = ${n}`);
 } else {
   console.error(`unknown command: ${command}`);
